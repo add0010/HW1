@@ -1,7 +1,0 @@
-__pycache__/
-*.py[cod]
-users.json
-storage/
-certs/*.pem
-certs/*.key
-certs/mtls/
