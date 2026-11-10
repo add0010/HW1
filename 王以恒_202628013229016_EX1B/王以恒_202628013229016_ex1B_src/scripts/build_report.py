@@ -29,6 +29,20 @@ def set_run_font(run, name: str, size: float, *, bold: bool = False, color: str 
     fonts.set(qn("w:eastAsia"), "Microsoft YaHei")
 
 
+def add_rich_text(paragraph, text: str) -> None:
+    """Add text to a paragraph, honoring **bold** and `code` inline markers."""
+    parts = re.split(r"(\*\*.+?\*\*)", text)
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("**") and part.endswith("**"):
+            run = paragraph.add_run(part[2:-2].replace("`", ""))
+            run.bold = True
+        else:
+            run = paragraph.add_run(part.replace("`", ""))
+        set_run_font(run, "Microsoft YaHei", 10.2)
+
+
 def set_shading(element, fill: str) -> None:
     props = element.get_or_add_pPr() if element.tag.endswith("}p") else element.get_or_add_tcPr()
     shading = props.find(qn("w:shd"))
@@ -125,6 +139,46 @@ def add_code_block(document: Document, lines: list[str]) -> None:
             paragraph.add_run().add_break()
         run = paragraph.add_run(line.rstrip())
         set_run_font(run, "Consolas", 8.2, color="243746")
+
+
+def add_image(document: Document, source: Path, alt: str, caption: str | None = None) -> None:
+    """Insert a centered image with an optional caption line below it."""
+    from PIL import Image
+
+    with Image.open(source) as img:
+        width_px, height_px = img.size
+
+    available = Inches(6.9)
+    max_width = available
+    max_height = Inches(5.6)
+    width_emu = int(max_width)
+    height_emu = int(width_emu * height_px / width_px)
+    if height_emu > int(max_height):
+        height_emu = int(max_height)
+        width_emu = int(height_emu * width_px / height_px)
+
+    paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.space_before = Pt(6)
+    paragraph.paragraph_format.space_after = Pt(2)
+    paragraph.paragraph_format.keep_with_next = True
+    run = paragraph.add_run()
+    run.add_picture(str(source), width=width_emu, height=height_emu)
+
+    if caption:
+        caption_paragraph = document.add_paragraph()
+        caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        caption_paragraph.paragraph_format.space_before = Pt(0)
+        caption_paragraph.paragraph_format.space_after = Pt(8)
+        caption_run = caption_paragraph.add_run(caption)
+        set_run_font(caption_run, "Microsoft YaHei", 9, color="52616B")
+    elif alt:
+        caption_paragraph = document.add_paragraph()
+        caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        caption_paragraph.paragraph_format.space_before = Pt(0)
+        caption_paragraph.paragraph_format.space_after = Pt(8)
+        caption_run = caption_paragraph.add_run(alt)
+        set_run_font(caption_run, "Microsoft YaHei", 9, color="52616B")
 
 
 def add_page_field(paragraph) -> None:
@@ -224,6 +278,18 @@ def build(source: Path, output: Path) -> None:
                 index += 1
             add_table(document, rows)
             continue
+        image_match = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$", stripped)
+        if image_match:
+            alt_text = image_match.group(1).strip()
+            image_path = image_match.group(2).strip()
+            image_file = (source.parent / image_path).resolve()
+            if not image_file.exists():
+                print(f"[WARN] image not found: {image_file}")
+                index += 1
+                continue
+            add_image(document, image_file, alt_text, alt_text)
+            index += 1
+            continue
         heading = re.match(r"^(#{1,3})\s+(.*)$", stripped)
         if heading:
             level = len(heading.group(1))
@@ -250,14 +316,14 @@ def build(source: Path, output: Path) -> None:
             continue
         if stripped.startswith("- "):
             paragraph = document.add_paragraph(style="List Bullet")
-            paragraph.add_run(stripped[2:])
+            add_rich_text(paragraph, stripped[2:])
         elif re.match(r"^\d+\.\s+", stripped):
             paragraph = document.add_paragraph(style="List Number")
-            paragraph.add_run(re.sub(r"^\d+\.\s+", "", stripped))
+            add_rich_text(paragraph, re.sub(r"^\d+\.\s+", "", stripped))
         else:
             paragraph = document.add_paragraph()
             paragraph.paragraph_format.widow_control = True
-            paragraph.add_run(stripped.replace("`", ""))
+            add_rich_text(paragraph, stripped)
         for run in paragraph.runs:
             set_run_font(run, "Microsoft YaHei", 10.2)
         index += 1
